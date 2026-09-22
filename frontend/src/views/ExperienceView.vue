@@ -1,0 +1,1 @@
+<template><div><h1 style='color:#7afcff'>EXPERIENCE</h1><div style='margin-top:20px;border-left:1px solid #234;padding-left:20px'><div style='color:#7afcff'>2024 — Present</div><div>Freelance Frontend — Vue + Three.js portfolios</div></div></div></template>

@@ -1,0 +1,1 @@
+<template><div><h1 style='color:#7afcff'>RESUME</h1><a href='/api/resume' target='_blank' style='margin-top:20px;display:inline-block;border:1px solid #7afcff;color:#7afcff;padding:10px 18px;text-decoration:none'>DOWNLOAD</a></div></template>

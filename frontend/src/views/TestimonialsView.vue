@@ -1,0 +1,1 @@
+<template><div><h1 style='color:#7afcff'>TESTIMONIALS</h1><p style='color:#8aa;margin-top:12px'>Client feedback will go here.</p></div></template>

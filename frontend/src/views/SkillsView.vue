@@ -1,0 +1,1 @@
+<template><div><h1 style='color:#7afcff'>SKILLS</h1><div style='margin-top:20px;display:flex;flex-wrap:wrap;gap:10px'><span v-for='s in ["Vue 3","Three.js","WebGL","GSAP","Node","TypeScript","Blender"]' :key='s' style='background:#11202a;border:1px solid #234;padding:8px 14px;color:#7afcff'>{{s}}</span></div></div></template>

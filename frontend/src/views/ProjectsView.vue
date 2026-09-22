@@ -1,0 +1,1 @@
+<template><div><h1 style='color:#7afcff'>PROJECTS — BACKSTACK</h1><div style='margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:16px'><div v-for='i in 4' :key='i' style='border:1px solid #1e3a4a;padding:16px'><h3>Project {{i}}</h3><p style='color:#8aa;margin-top:8px'>Three.js / Vue experiment.</p></div></div></div></template>
