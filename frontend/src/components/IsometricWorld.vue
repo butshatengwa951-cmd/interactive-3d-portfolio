@@ -16,6 +16,7 @@ onMounted(()=>{
   const renderer = new THREE.WebGLRenderer({ canvas: canvas.value, antialias:true, alpha:false })
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.setPixelRatio(props.quality === 'HIGH' ? Math.min(window.devicePixelRatio,2) : 1)
+  canvas.value.__renderer = renderer
 
   const d = 11
   const aspect = window.innerWidth/window.innerHeight
