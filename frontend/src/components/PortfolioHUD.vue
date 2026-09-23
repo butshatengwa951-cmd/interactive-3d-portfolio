@@ -1,5 +1,5 @@
 <template>
-  <>
+  <div>
     <div class="absolute top-0 left-0 right-0 z-20 flex justify-between p-4 md:p-5 pointer-events-none">
       <div class="pointer-events-auto font-mono">
         <div class="flex items-center gap-3">
@@ -43,7 +43,7 @@
         └ CLICK TO OPEN [{{ hovered }}] ┘
       </div>
     </div>
-  </>
+  </div>
 </template>
 <script setup>
 import { ref } from 'vue'
