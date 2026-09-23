@@ -1,80 +1,24 @@
 
-<template>
-  <div ref="root" class="world">
-    <canvas ref="canvas" class="canvas"></canvas>
-    <div ref="labels" class="labels"></div>
-    <div v-if="hovered" class="tooltip" :style="{left: tooltip.x + 'px', top: tooltip.y + 'px'}">
-      └ CLICK TO OPEN [{{ hovered }}] ┘
-    </div>
-  </div>
-</template>
+<template><canvas ref="canvas" class="canvas"></canvas></template>
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 const emit = defineEmits(['open'])
-const root = ref(null)
 const canvas = ref(null)
-const labels = ref(null)
-const hovered = ref(null)
-const tooltip = ref({ x: 0, y: 0 })
-defineExpose({ triggerEnergyFlow })
-
-onBeforeUnmount(() => cleanup?.())
-
-let controls
-let composer
-let animationId
-let cleanup
 
 onMounted(()=>{
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x05080c)
-  scene.fog = new THREE.Fog(0x05080c, 18, 36)
+  scene.background = new THREE.Color(0x05070a)
+  scene.fog = new THREE.Fog(0x05070a, 18, 55)
 
-  const width = root.value?.clientWidth || window.innerWidth
-  const height = root.value?.clientHeight || window.innerHeight
-  const aspect = width / height
-  const viewSize = 15
-  const camera = new THREE.OrthographicCamera(
-    -viewSize * aspect / 2, viewSize * aspect / 2,
-    viewSize / 2, -viewSize / 2, 0.1, 100
-  )
-  camera.position.set(10,10,10)
-  camera.lookAt(0,0,0)
-  camera.zoom = 1.05
-  camera.updateProjectionMatrix()
-
-  const renderer = new THREE.WebGLRenderer({
-    canvas: canvas.value,
-    antialias:true,
-    alpha:false,
-    powerPreference:'high-performance'
-  })
-  renderer.setSize(width, height)
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas.value, antialias:true, alpha:false })
+  renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,2))
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap
-  renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.1
 
-  controls = new OrbitControls(camera, renderer.domElement)
-  controls.target.set(0,0,0)
-  controls.enableDamping = true
-  controls.dampingFactor = 0.09
-  controls.enablePan = false
-  controls.minZoom = 0.7
-  controls.maxZoom = 1.9
-  controls.minPolarAngle = Math.PI * 0.22
-  controls.maxPolarAngle = Math.PI * 0.42
-  controls.minAzimuthAngle = -0.85
-  controls.maxAzimuthAngle = 0.85
-  controls.rotateSpeed = 0.55
-  controls.update()
+  const d = 11
+  const aspect = window.innerWidth/window.innerHeight
+  const camera = new THREE.OrthographicCamera(-d*aspect, d*aspect, d, -d, 0.1, 100)
+  camera.position.set(10,10,10); camera.lookAt(0,0,0)
 
   // PCB floor texture
   const floorCanvas = document.createElement('canvas'); floorCanvas.width=1024; floorCanvas.height=1024
@@ -86,7 +30,7 @@ onMounted(()=>{
   for(let x=0;x<1024;x+=48) for(let y=0;y<1024;y+=48){ fctx.beginPath(); fctx.arc(x,y,2,0,Math.PI*2); fctx.fill() }
   const floorTex = new THREE.CanvasTexture(floorCanvas); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(4,4)
   const floorMat = new THREE.MeshBasicMaterial({ map: floorTex })
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(110,110), floorMat); floor.rotation.x=-Math.PI/2; floor.position.y=-0.15; scene.add(floor)
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(80,80), floorMat); floor.rotation.x=-Math.PI/2; floor.position.y=-0.15; scene.add(floor)
 
   // dot grid points
   const dots=[]; for(let x=-20;x<=20;x+=0.7) for(let z=-20;z<=20;z+=0.7) dots.push(x,0,z)
@@ -143,7 +87,7 @@ onMounted(()=>{
 
   nodes.forEach(n=>{
     const g = new THREE.Group(); g.position.set(...n.pos); g.userData.id=n.id
-    const plat = new THREE.Mesh(new THREE.CylinderGeometry(n.id==='PROJECTS'?1.35:1.18,(n.id==='PROJECTS'?1.35:1.18)*0.92,0.44,6), glowMat)
+    const plat = new THREE.Mesh(new THREE.CylinderGeometry(0.85,0.85,0.12,6), glowMat)
     // edge glow
     const edges = new THREE.EdgesGeometry(new THREE.CylinderGeometry(0.86,0.86,0.12,6))
     const edgeLine = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color:0x1a3a4a, transparent:true, opacity:0.6 })); edgeLine.position.y=0.01
@@ -251,141 +195,28 @@ onMounted(()=>{
     animateTracer()
   }
 
-  // interaction — reference-style hover, click and constrained orbit controls
-  const ray = new THREE.Raycaster()
-  const mouse = new THREE.Vector2()
-
-  const labelEls = new Map()
-  nodes.forEach(n => {
-    const el = document.createElement('button')
-    el.type = 'button'
-    el.className = 'label-tag'
-    el.innerHTML = '<span class="bracket">└</span> ' + n.label + ' <span class="bracket">┘</span>'
-    el.addEventListener('click', () => {
-      if (!isAnimating) triggerEnergyFlow(n.id, () => emit('open', n.id))
-    })
-    labels.value.appendChild(el)
-    labelEls.set(n.id, el)
+  // interaction
+  const ray=new THREE.Raycaster(), mouse=new THREE.Vector2()
+  let isDrag=false, prev={x:0,y:0}
+  canvas.value.addEventListener('mousedown', e=>{ isDrag=false; prev={x:e.clientX,y:e.clientY} })
+  canvas.value.addEventListener('mousemove', e=>{
+    const dx=e.clientX-prev.x, dy=e.clientY-prev.y
+    if(Math.hypot(dx,dy)>3){ isDrag=true; camera.position.applyAxisAngle(new THREE.Vector3(0,1,0), -dx*0.01); camera.lookAt(0,0,0); prev={x:e.clientX,y:e.clientY} }
   })
-
-  const updatePointer = (e) => {
-    const rect = canvas.value.getBoundingClientRect()
-    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
-    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
-    ray.setFromCamera(mouse, camera)
-    const hits = ray.intersectObjects(interactives, true)
-
-    if (!hits.length || isAnimating) {
-      hovered.value = null
-      canvas.value.style.cursor = isAnimating ? 'wait' : 'grab'
-      return
-    }
-
-    let nodeId = null
-    for (const hit of hits) {
-      let o = hit.object
-      while (o) {
-        if (o.userData && o.userData.id) { nodeId = o.userData.id; break }
-        o = o.parent
-      }
-      if (nodeId) break
-    }
-
-    hovered.value = nodeId
-    canvas.value.style.cursor = nodeId ? 'pointer' : 'grab'
-    if (nodeId) {
-      const rr = root.value.getBoundingClientRect()
-      tooltip.value = { x: e.clientX - rr.left, y: e.clientY - rr.top + 18 }
-    }
-  }
-
-  const handleClick = () => {
-    if (isAnimating) return
-    ray.setFromCamera(mouse, camera)
-    const hits = ray.intersectObjects(interactives, true)
-    for (const hit of hits) {
-      let o = hit.object
-      while (o) {
-        if (o.userData && o.userData.id) {
-          triggerEnergyFlow(o.userData.id, () => emit('open', o.userData.id))
-          return
-        }
-        o = o.parent
-      }
-    }
-  }
-
-  canvas.value.addEventListener('pointermove', updatePointer)
-  canvas.value.addEventListener('click', handleClick)
+  canvas.value.addEventListener('mouseup', e=>{
+    if(isDrag){ isDrag=false; return }
+    mouse.x=(e.clientX/window.innerWidth)*2-1; mouse.y=-(e.clientY/window.innerHeight)*2+1
+    ray.setFromCamera(mouse,camera)
+    const hits=ray.intersectObjects(interactives,true)
+    if(hits.length){ let o=hits[0].object; while(o.parent && !o.userData.id) o=o.parent; if(o.userData.id && !isAnimating){ triggerEnergyFlow(o.userData.id, ()=>{ emit('open', o.userData.id) }) } }
+    isDrag=false
+  })
+  canvas.value.addEventListener('wheel', e=>{ camera.zoom*=(e.deltaY>0?1.08:0.92); camera.zoom=Math.max(0.6,Math.min(3,camera.zoom)); camera.updateProjectionMatrix() })
 
   const clock=new THREE.Clock()
-  composer = new EffectComposer(renderer)
-  composer.addPass(new RenderPass(scene,camera))
-  composer.addPass(new UnrealBloomPass(new THREE.Vector2(width,height),0.62,0.35,0.12))
-
-  const projectLabels = () => {
-    const v = new THREE.Vector3()
-    nodes.forEach(n => {
-      const g = nodeDataMap.get(n.id)?.group
-      const el = labelEls.get(n.id)
-      if (!g || !el) return
-      g.getWorldPosition(v)
-      v.y += 1
-      if (n.id === 'PROJECTS') v.z -= 0.35
-      v.project(camera)
-      if (v.z > 1) { el.style.opacity = '0'; return }
-      el.style.opacity = '1'
-      el.style.left = ((v.x * 0.5 + 0.5) * width) + 'px'
-      el.style.top = ((v.y * -0.5 + 0.5) * height) + 'px'
-    })
-  }
-
-  const animate = () => {
-    animationId = requestAnimationFrame(animate)
-    const t = clock.getElapsedTime()
-    controls.update()
-    interactives.forEach(g => {
-      g.position.y = g.userData.baseY + Math.sin(t + g.userData.t) * 0.06
-    })
-    human.position.y = Math.sin(t * 1.2) * 0.04
-    centerGroup.rotation.y += 0.0015
-    projectLabels()
-    composer.render()
-  }
+  function animate(){ requestAnimationFrame(animate); const t=clock.getElapsedTime(); interactives.forEach(g=>{ g.position.y=g.userData.baseY+Math.sin(t+g.userData.t)*0.07 }); human.position.y=Math.sin(t*1.2)*0.04; centerGroup.rotation.y+=0.0015; renderer.render(scene,camera) }
   animate()
-
-  const onResize = () => {
-    const w = root.value?.clientWidth || innerWidth
-    const h = root.value?.clientHeight || innerHeight
-    const asp = w / h
-    camera.left = -viewSize * asp / 2
-    camera.right = viewSize * asp / 2
-    camera.top = viewSize / 2
-    camera.bottom = -viewSize / 2
-    camera.updateProjectionMatrix()
-    renderer.setSize(w,h)
-    composer.setSize(w,h)
-  }
-  window.addEventListener('resize', onResize)
-
-  cleanup = () => {
-    cancelAnimationFrame(animationId)
-    window.removeEventListener('resize', onResize)
-    canvas.value?.removeEventListener('pointermove', updatePointer)
-    canvas.value?.removeEventListener('click', handleClick)
-    controls?.dispose()
-    composer?.dispose()
-    renderer.dispose()
-    labelEls.forEach(el => el.remove())
-  }
+  window.addEventListener('resize',()=>{ renderer.setSize(innerWidth,innerHeight); const asp=innerWidth/innerHeight; camera.left=-d*asp; camera.right=d*asp; camera.top=d; camera.bottom=-d; camera.updateProjectionMatrix() })
 })
 </script>
-<style>
-.world{position:relative;width:100%;height:100svh;overflow:hidden;background:#05080c;user-select:none}
-.canvas{width:100%;height:100%;display:block;cursor:grab}
-.canvas:active{cursor:grabbing}
-.labels{position:absolute;inset:0;z-index:10;pointer-events:none}
-.label-tag{position:absolute;transform:translate(-50%,-100%);pointer-events:auto;border:0;background:transparent;padding:0;color:#7a9aaa;font:10px/1.2 'JetBrains Mono',monospace;letter-spacing:.12em;white-space:nowrap;cursor:pointer;text-shadow:0 0 10px rgba(124,250,255,.06)}
-.label-tag:hover{color:#e8fdff}.label-tag .bracket{color:#3a5a6a}
-.tooltip{position:absolute;z-index:20;transform:translate(-50%,0);padding:6px 10px;pointer-events:none;border:1px solid rgba(124,250,255,.2);background:rgba(0,0,0,.7);color:#7cfaff;font:10px/1.2 'JetBrains Mono',monospace;letter-spacing:.1em;backdrop-filter:blur(8px);white-space:nowrap}
-</style>
+<style>.canvas{width:100vw;height:100vh;display:block;cursor:grab}.canvas:active{cursor:grabbing}</style>
