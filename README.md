@@ -1,14 +1,25 @@
+# Isometric 3D Portfolio
 
-# Isometric Portfolio — Final Foundation (Energy Flow)
-Exactly like the demo: https://...
+A clean rebuild of the portfolio around the supplied demo as the source of truth.
 
-Run:
-cd frontend && npm i && npm run dev
-cd backend && npm i && npm run dev
+## Structure
 
-Features:
-- Central white chip with humanoid (YOU)
-- 8 nodes same size: BACKSTACK, TESTIMONIALS, EXPERIENCE, SKILLS, PROJECTS, CONTACT, RESUME, ABOUT ME
-- Motherboard PCB floor
-- On click: energy flows from center to node (cyan tracer + line glow), then opens modal
-- No hover flow
+frontend/
+- index.html — minimal Vite entry
+- src/demo.js — extracted demo application bundle
+- src/style.css — demo styling
+- src/external-links.js — external-link handling
+- vite.config.js — Vite configuration
+- package.json — frontend dependencies
+
+The previous Vue scene/component stack has been removed from the active application path. The supplied demo remains the visual and interaction backbone.
+
+## Run
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Build with `npm run build`.
