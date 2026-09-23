@@ -499,7 +499,6 @@ onMounted(() => {
     animateEnergy(data)
   }
 
-  setupInteraction(nodeMap)
   const interactionCleanup = setupInteraction(nodeMap)
 
   const onResize = () => {
