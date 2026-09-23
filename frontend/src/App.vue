@@ -2,7 +2,7 @@
   <div class="reference-shell">
     <iframe
       class="reference-frame"
-      src="/isometric-reference.html"
+      src="./isometric-reference.html"
       title="Isometric Portfolio"
       allow="fullscreen"
     ></iframe>
