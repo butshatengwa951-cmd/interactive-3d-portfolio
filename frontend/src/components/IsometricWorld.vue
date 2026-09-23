@@ -1,232 +1,650 @@
+<template>
+  <div ref="root" class="world">
+    <canvas ref="canvas"></canvas>
+    <div ref="labels" class="labels"></div>
+    <div class="noise"></div>
+    <div class="vignette"></div>
+  </div>
+</template>
 
-<template><canvas ref="canvas" class="canvas"></canvas></template>
 <script setup>
-import { onMounted, ref, watch, onBeforeUnmount } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch, defineExpose } from 'vue'
 import * as THREE from 'three'
-const emit = defineEmits(['open','hover'])
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+
+const emit = defineEmits(['open', 'hover'])
 const props = defineProps({ quality: { type: String, default: 'HIGH' } })
-let triggerEnergyFlowRef = null
+
+const root = ref(null)
 const canvas = ref(null)
+const labels = ref(null)
 
-onMounted(()=>{
-  const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x05070a)
-  scene.fog = new THREE.Fog(0x05070a, 18, 55)
+let renderer, scene, camera, controls, composer, raf = 0
+let raycaster, pointer
+let cleanup = () => {}
+let triggerEnergyFlow = () => {}
+let hoveredId = null
 
-  const renderer = new THREE.WebGLRenderer({ canvas: canvas.value, antialias:true, alpha:false })
-  renderer.setSize(window.innerWidth, window.innerHeight)
-  renderer.setPixelRatio(props.quality === 'HIGH' ? Math.min(window.devicePixelRatio,2) : 1)
-  canvas.value.__renderer = renderer
+const NODE_LAYOUT = [
+  { id: 'BACKSTACK', pos: [-6, -4], scale: .95 },
+  { id: 'TESTIMONIALS', pos: [-8, -1], scale: .92 },
+  { id: 'EXPERIENCE', pos: [-6.5, 4], scale: 1 },
+  { id: 'SKILLS', pos: [-1.5, 3], scale: 1 },
+  { id: 'PROJECTS', pos: [-1, -5.5], scale: 1.05 },
+  { id: 'CONTACT', pos: [5, -3.5], scale: .92 },
+  { id: 'RESUME', pos: [6, 0], scale: .95 },
+  { id: 'ABOUT ME', pos: [3.5, 4.5], scale: 1 }
+]
 
-  const d = 11
-  const aspect = window.innerWidth/window.innerHeight
-  const camera = new THREE.OrthographicCamera(-d*aspect, d*aspect, d, -d, 0.1, 100)
-  camera.position.set(10,10,10); camera.lookAt(0,0,0)
+function mat(color, extra = {}) {
+  return new THREE.MeshStandardMaterial({ color, ...extra })
+}
 
-  // PCB floor texture
-  const floorCanvas = document.createElement('canvas'); floorCanvas.width=1024; floorCanvas.height=1024
-  const fctx = floorCanvas.getContext('2d')
-  fctx.fillStyle='#05070a'; fctx.fillRect(0,0,1024,1024)
-  fctx.strokeStyle='#0a151c'; fctx.lineWidth=1
-  for(let i=0;i<1024;i+=48){ fctx.beginPath(); fctx.moveTo(i,0); fctx.lineTo(i,1024); fctx.stroke(); fctx.beginPath(); fctx.moveTo(0,i); fctx.lineTo(1024,i); fctx.stroke() }
-  fctx.fillStyle='#0e2530'
-  for(let x=0;x<1024;x+=48) for(let y=0;y<1024;y+=48){ fctx.beginPath(); fctx.arc(x,y,2,0,Math.PI*2); fctx.fill() }
-  const floorTex = new THREE.CanvasTexture(floorCanvas); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(4,4)
-  const floorMat = new THREE.MeshBasicMaterial({ map: floorTex })
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(80,80), floorMat); floor.rotation.x=-Math.PI/2; floor.position.y=-0.15; scene.add(floor)
-
-  // dot grid points
-  const dots=[]; for(let x=-20;x<=20;x+=0.7) for(let z=-20;z<=20;z+=0.7) dots.push(x,0,z)
-  const dotGeo = new THREE.BufferGeometry(); dotGeo.setAttribute('position', new THREE.Float32BufferAttribute(dots,3))
-  scene.add(new THREE.Points(dotGeo, new THREE.PointsMaterial({ color:0x122a36, size:0.04, transparent:true, opacity:0.6 })))
-
-  scene.add(new THREE.AmbientLight(0x556677,1.1))
-  const dir = new THREE.DirectionalLight(0x7afcff,0.9); dir.position.set(5,12,5); scene.add(dir)
-  const rim = new THREE.DirectionalLight(0x0a2a3a,1); rim.position.set(-8,5,-8); scene.add(rim)
-
-  const glowMat = new THREE.MeshStandardMaterial({ color:0x0a0a0f, emissive:0x0a1a20, emissiveIntensity:0.4 })
-  const baseLineMat = new THREE.LineBasicMaterial({ color:0x253a45, transparent:true, opacity:0.55 })
-
-  // Central white chip - YOU
-  const centerGroup = new THREE.Group()
-  const whiteChip = new THREE.Mesh(new THREE.BoxGeometry(1.3,0.16,1.3), new THREE.MeshStandardMaterial({ color:0xeaffff, emissive:0x7afcff, emissiveIntensity:1.2 }))
-  whiteChip.position.y=0.16
-  const innerChip = new THREE.Mesh(new THREE.BoxGeometry(0.6,0.18,0.6), new THREE.MeshStandardMaterial({ color:0xffffff, emissive:0x7afcff, emissiveIntensity:1.8 }))
-  innerChip.position.y=0.32
-  // corner brackets around center
-  const bracketGeo = new THREE.BoxGeometry(0.2,0.04,0.04)
-  const bracketMat = new THREE.MeshBasicMaterial({ color:0x7afcff })
-  const brackets=[]
-  ;[[-0.8,-0.8],[0.8,-0.8],[-0.8,0.8],[0.8,0.8]].forEach(([x,z])=>{
-    const b = new THREE.Mesh(bracketGeo, bracketMat); b.position.set(x,0.35,z); brackets.push(b)
+function glowPlane(geometry, y = 0, opacity = .18) {
+  const m = new THREE.MeshBasicMaterial({
+    color: 0x7cfaff, transparent: true, opacity,
+    depthTest: false, blending: THREE.AdditiveBlending
   })
-  // humanoid on center
-  const human = new THREE.Group()
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.14,0.45,4,8), new THREE.MeshStandardMaterial({ color:0x07070a, emissive:0x0a2230, emissiveIntensity:0.3 }))
-  body.position.y=0.75
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.14,12,12), new THREE.MeshStandardMaterial({ color:0x0a0a0a, emissive:0x111111, emissiveIntensity:0.2 }))
-  head.position.y=1.12
-  const armL = new THREE.Mesh(new THREE.CapsuleGeometry(0.04,0.25,3,6), new THREE.MeshStandardMaterial({ color:0x07070a })); armL.position.set(-0.18,0.75,0); armL.rotation.z=0.3
-  const armR = new THREE.Mesh(new THREE.CapsuleGeometry(0.04,0.25,3,6), new THREE.MeshStandardMaterial({ color:0x07070a })); armR.position.set(0.18,0.75,0); armR.rotation.z=-0.3
-  const legL = new THREE.Mesh(new THREE.CapsuleGeometry(0.05,0.28,3,6), new THREE.MeshStandardMaterial({ color:0x07070a })); legL.position.set(-0.07,0.35,0)
-  const legR = new THREE.Mesh(new THREE.CapsuleGeometry(0.05,0.28,3,6), new THREE.MeshStandardMaterial({ color:0x07070a })); legR.position.set(0.07,0.35,0)
-  human.add(body, head, armL, armR, legL, legR)
-  centerGroup.add(whiteChip, innerChip, human, ...brackets)
-  scene.add(centerGroup)
+  const mesh = new THREE.Mesh(geometry, m)
+  mesh.position.y = y
+  return mesh
+}
 
-  const nodes = [
-    { id:'backstack', pos:[-6,0,-4], label:'BACKSTACK', model:'gate' },
-    { id:'testimonials', pos:[-8,0,-1], label:'TESTIMONIALS', model:'dish' },
-    { id:'experience', pos:[-6.5,0,4], label:'EXPERIENCE', model:'exp' },
-    { id:'skills', pos:[-1.5,0,3.2], label:'SKILLS', model:'desk' },
-    { id:'projects', pos:[-1,0,-5.5], label:'PROJECTS', model:'city' },
-    { id:'contact', pos:[5,0,-3.5], label:'CONTACT', model:'dish' },
-    { id:'resume', pos:[6,0,0], label:'RESUME', model:'desk2' },
-    { id:'about', pos:[3.5,0,4.5], label:'ABOUT ME', model:'about' },
-  ]
+function makePlate(size = 1.18, height = .44) {
+  const g = new THREE.Group()
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(size, size * .92, height, 6),
+    mat(0x080a0f, { roughness: .92, metalness: .06 })
+  )
+  body.position.y = -height / 2
+  body.castShadow = body.receiveShadow = true
+  g.add(body)
 
-  const interactives=[]
-  const nodeDataMap = new Map()
+  const top = new THREE.Mesh(
+    new THREE.CylinderGeometry(size * .985, size * .985, .012, 6),
+    mat(0x0c1a1e, { emissive: 0x7cfaff, emissiveIntensity: 1.15, roughness: .4 })
+  )
+  top.position.y = .002
+  g.add(top)
 
-  nodes.forEach(n=>{
-    const g = new THREE.Group(); g.position.set(...n.pos); g.userData.id=n.id
-    const plat = new THREE.Mesh(new THREE.CylinderGeometry(0.85,0.85,0.12,6), glowMat)
-    // edge glow
-    const edges = new THREE.EdgesGeometry(new THREE.CylinderGeometry(0.86,0.86,0.12,6))
-    const edgeLine = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color:0x1a3a4a, transparent:true, opacity:0.6 })); edgeLine.position.y=0.01
-    g.add(plat, edgeLine)
+  g.add(glowPlane(new THREE.CircleGeometry(size * 1.2, 24), -height - .73, .55))
+  return g
+}
 
-    if(n.model==='gate'){
-      const gate = new THREE.Mesh(new THREE.BoxGeometry(1.1,1.4,0.18), new THREE.MeshStandardMaterial({ color:0x0e0e12, emissive:0x102030, emissiveIntensity:0.3 })); gate.position.y=0.8; g.add(gate)
-      const door = new THREE.Mesh(new THREE.PlaneGeometry(0.5,0.85), new THREE.MeshBasicMaterial({ color:0x7afcff, side:THREE.DoubleSide, transparent:true, opacity:0.85 })); door.position.set(0,0.82,0.11); g.add(door)
-    } else if(n.model==='dish'){
-      const dish = new THREE.Mesh(new THREE.TorusGeometry(0.45,0.07,8,20,Math.PI), new THREE.MeshStandardMaterial({ color:0x1a1a1e })); dish.rotation.x=Math.PI/1.7; dish.position.y=0.75; g.add(dish)
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.5,8), glowMat); pole.position.y=0.4; g.add(pole)
-      const base = new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.22,0.08,12), new THREE.MeshStandardMaterial({ color:0x111 })); base.position.y=0.16; g.add(base)
-    } else if(n.model==='city'){
-      for(let i=0;i<6;i++){ const h=0.45+Math.random()*1.1; const b=new THREE.Mesh(new THREE.BoxGeometry(0.38, h, 0.38), new THREE.MeshStandardMaterial({ color:0x08080a })); b.position.set((i%3)*0.46-0.46, h/2+0.12, Math.floor(i/3)*0.46-0.23); if(i===2){ const win=new THREE.Mesh(new THREE.PlaneGeometry(0.12,0.12), new THREE.MeshBasicMaterial({ color:0x7afcff })); win.position.set(b.position.x, b.position.y, b.position.z+0.2); g.add(win) } g.add(b) }
-    } else if(n.model==='exp'){
-      const desk = new THREE.Mesh(new THREE.BoxGeometry(0.7,0.12,0.5), glowMat); desk.position.y=0.5; g.add(desk)
-      const mon = new THREE.Mesh(new THREE.PlaneGeometry(0.35,0.22), new THREE.MeshBasicMaterial({ color:0x7afcff, side:THREE.DoubleSide })); mon.position.set(0,0.75,0); mon.rotation.y=0.2; g.add(mon)
-      const fig = new THREE.Mesh(new THREE.CapsuleGeometry(0.09,0.25,3,6), new THREE.MeshStandardMaterial({ color:0x07070a })); fig.position.set(0.15,0.55,0.15); g.add(fig)
+function makeHuman(scale = 1) {
+  const g = new THREE.Group()
+  g.scale.setScalar(scale)
+
+  const dark = mat(0x080808, { roughness: .85, metalness: .08, emissive: 0x0a2a33, emissiveIntensity: .22 })
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.11, .28, 4, 8), dark)
+  body.position.y = .36
+  body.userData.breathe = true
+  g.add(body)
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.105, 14, 14), dark)
+  head.position.y = .68
+  g.add(head)
+
+  const arm = new THREE.Mesh(new THREE.CapsuleGeometry(.032, .18, 4, 6), dark)
+  const left = arm.clone(); left.position.set(-.16, .38, 0); left.rotation.z = -.25
+  const right = arm.clone(); right.position.set(.16, .38, 0); right.rotation.z = .25
+  g.add(left, right)
+
+  const leg = new THREE.Mesh(new THREE.CapsuleGeometry(.038, .22, 4, 6), dark)
+  const l = leg.clone(); l.position.set(-.07, .14, 0)
+  const r = leg.clone(); r.position.set(.07, .14, 0)
+  g.add(l, r)
+
+  const ring = new THREE.Mesh(
+    new THREE.CylinderGeometry(.018, .018, .018, 6),
+    new THREE.MeshBasicMaterial({ color: 0x7cfaff, transparent: true, opacity: .8 })
+  )
+  ring.position.set(0, .72, .05)
+  g.add(ring)
+  g.userData.breathe = true
+  return g
+}
+
+function addNodeModel(group, id, scale) {
+  group.add(makePlate(id === 'PROJECTS' ? 1.35 : 1.18, .44))
+
+  const dark = mat(0x080a0f, { roughness: .9, metalness: .06 })
+  const black = mat(0x080808, { roughness: .85, metalness: .08, emissive: 0x0a2a33, emissiveIntensity: .22 })
+  const cyan = mat(0x0c1a1e, { emissive: 0x7cfaff, emissiveIntensity: 1.15, roughness: .4 })
+
+  if (id === 'PROJECTS') {
+    const buildings = [
+      [-.5, .25, -.4, .7], [.1, .32, -.5, .9], [.55, .28, -.2, .6],
+      [-.35, .22, .3, .55], [.25, .38, .35, 1], [.65, .2, .55, .45]
+    ]
+    buildings.forEach((v, i) => {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(.32, v[3], .32), dark)
+      b.position.set(v[0], v[3] / 2 + .02, v[2])
+      b.castShadow = true
+      group.add(b)
+      group.add(glowPlane(new THREE.BoxGeometry(.32, .01, .32), v[3] + .03, .15))
+      if (i === 1) {
+        const sign = glowPlane(new THREE.BoxGeometry(.22, .14, .012), v[3] + .04, .55)
+        sign.position.z += .17
+        sign.rotation.x = -.35
+        group.add(sign)
+      }
+    })
+  } else if (id === 'BACKSTACK') {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(.56, .72, .42), dark)
+    box.position.y = .38
+    box.castShadow = true
+    group.add(box)
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, .5, 8), dark)
+    mast.position.set(.32, .45, .12); mast.rotation.z = .6
+    group.add(mast)
+  } else if (id === 'TESTIMONIALS' || id === 'CONTACT') {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.035, .035, .48, 8), dark)
+    pole.position.y = .24
+    group.add(pole)
+    const dish = new THREE.Mesh(
+      new THREE.SphereGeometry(.34, 16, 16, 0, Math.PI * 2, 0, Math.PI * .52),
+      mat(0x0e141a, { roughness: .55, metalness: .18 })
+    )
+    dish.position.y = .53
+    dish.rotation.x = Math.PI * .22
+    dish.rotation.z = id === 'CONTACT' ? -.32 : .28
+    group.add(dish)
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(.34, .014, 6, 20), cyan)
+    rim.position.copy(dish.position); rim.rotation.copy(dish.rotation)
+    group.add(rim)
+    const box = new THREE.Mesh(new THREE.BoxGeometry(.2, .11, .16), dark)
+    box.position.set(.14, .08, .13)
+    group.add(box)
+  } else if (id === 'EXPERIENCE' || id === 'SKILLS' || id === 'ABOUT ME') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(.78, .05, .46), dark)
+    base.position.y = .26; base.castShadow = true; group.add(base)
+    ;[-.28, .28].forEach(x => {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(.05, .26, .05), dark)
+      leg.position.set(x, .13, -.12); group.add(leg)
+    })
+    if (id === 'SKILLS' || id === 'EXPERIENCE') {
+      const screen = new THREE.Mesh(
+        new THREE.BoxGeometry(id === 'SKILLS' ? .46 : .52, .32, .04),
+        dark
+      )
+      screen.position.set(0, .54 + (id === 'EXPERIENCE' ? .04 : 0), -.1)
+      screen.rotation.x = -.08
+      group.add(screen)
+      group.add(glowPlane(new THREE.BoxGeometry(id === 'SKILLS' ? .38 : .44, .22, .008),
+        .55 + (id === 'EXPERIENCE' ? .04 : 0), id === 'SKILLS' ? .62 : .45))
     } else {
-      const desk = new THREE.Mesh(new THREE.BoxGeometry(0.65,0.12,0.5), glowMat); desk.position.y=0.48; g.add(desk)
-      const fig = new THREE.Mesh(new THREE.CapsuleGeometry(0.09,0.22,3,6), new THREE.MeshStandardMaterial({ color:0x07070a })); fig.position.set(0.1,0.52,0.18); g.add(fig)
-      if(n.id==='skills' || n.id==='resume'){ const mon = new THREE.Mesh(new THREE.PlaneGeometry(0.3,0.2), new THREE.MeshBasicMaterial({ color:0x7afcff })); mon.position.set(0,0.7,0); g.add(mon) }
+      const screen = new THREE.Mesh(new THREE.BoxGeometry(.36, .24, .04), dark)
+      screen.position.set(-.05, .5, -.08); screen.rotation.x = -.06
+      group.add(screen)
     }
+    const chair = new THREE.Mesh(new THREE.CapsuleGeometry(.095, .18, 4, 8), mat(0x12141c))
+    chair.position.set(0, .19, .32); group.add(chair)
+    const person = makeHuman(.62); person.position.set(0, .18, .28); group.add(person)
+  } else if (id === 'RESUME') {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(.84, .05, .54), dark)
+    base.position.y = .3; group.add(base)
+    const paper = new THREE.Mesh(new THREE.BoxGeometry(.34, .24, .04), dark)
+    paper.position.set(-.04, .56, -.09); group.add(paper)
+    group.add(glowPlane(new THREE.BoxGeometry(.27, .17, .008), .57, .88))
+    const chair = new THREE.Mesh(new THREE.CapsuleGeometry(.085, .16, 4, 8), dark)
+    chair.position.set(.09, .2, .33); group.add(chair)
+  }
+  group.scale.setScalar(scale)
+}
 
-    g.userData.baseY=0; g.userData.t=Math.random()*10; scene.add(g); interactives.push(g)
+function createFloor() {
+  const c = document.createElement('canvas')
+  c.width = c.height = 1024
+  const x = c.getContext('2d')
+  x.fillStyle = '#05080c'; x.fillRect(0, 0, 1024, 1024)
+  x.strokeStyle = '#0a1318'; x.lineWidth = 1
+  for (let i = 0; i < 1024; i += 64) {
+    x.globalAlpha = .55
+    x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 1024); x.stroke()
+    x.beginPath(); x.moveTo(0, i); x.lineTo(1024, i); x.stroke()
+  }
+  x.strokeStyle = '#081219'
+  for (let i = 0; i < 1024; i += 16) {
+    x.globalAlpha = .18
+    x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 1024); x.stroke()
+    x.beginPath(); x.moveTo(0, i); x.lineTo(1024, i); x.stroke()
+  }
+  x.strokeStyle = '#0a1f26'
+  for (let i = 0; i < 140; i++) {
+    const a = Math.random() * 1024, b = Math.random() * 1024, o = 40 + Math.random() * 120
+    x.globalAlpha = .22 + Math.random() * .18
+    x.beginPath(); x.moveTo(a, b); x.lineTo(a + o, b); x.lineTo(a + o, b + (Math.random() > .5 ? o * .6 : -o * .6)); x.stroke()
+    x.fillStyle = '#0f2a33'; x.globalAlpha = .7; x.fillRect(a - 1.5, b - 1.5, 3, 3)
+  }
+  const tex = new THREE.CanvasTexture(c)
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.repeat.set(2.5, 2.5)
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(110, 110),
+    new THREE.MeshStandardMaterial({ map: tex, color: 0x05080c, roughness: .95, metalness: .05 })
+  )
+  floor.rotation.x = -Math.PI / 2
+  floor.position.y = -.88
+  floor.receiveShadow = true
+  return floor
+}
 
-    // line with elbow
-    const start = new THREE.Vector3(0,0.18,0)
-    const elbow = new THREE.Vector3(n.pos[0]*0.35, 0.06, n.pos[2]*0.35)
-    const end = new THREE.Vector3(...n.pos)
-    const pts = [start, elbow, end]
-    const lineGeo = new THREE.BufferGeometry().setFromPoints(pts)
-    const line = new THREE.Line(lineGeo, baseLineMat.clone())
-    scene.add(line)
+function addCentralChip() {
+  const centralGroup = new THREE.Group()
+  centralGroup.userData.isCentralChip = true
 
-    // store for energy flow
-    const segLens = []; let total=0
-    for(let i=0;i<pts.length-1;i++){ const l=pts[i].distanceTo(pts[i+1]); segLens.push(l); total+=l }
-    nodeDataMap.set(n.id, { group:g, line, pts, segLens, totalLen: total, baseLineMat: line.material })
+  const white = mat(0xeaffff, { emissive: 0x7afcff, emissiveIntensity: 1.2, roughness: .22, metalness: .05 })
+  const white2 = mat(0xf8ffff, { emissive: 0x7cfaff, emissiveIntensity: .9, roughness: .2 })
 
-    // label sprite
-    const c = document.createElement('canvas'); c.width=256; c.height=64
-    const ctx = c.getContext('2d'); ctx.clearRect(0,0,256,64); ctx.fillStyle='#7fa3b3'; ctx.font='10px JetBrains Mono'; ctx.fillText('└ '+n.label+' ┘',10,32)
-    const tex = new THREE.CanvasTexture(c)
-    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, opacity:0.9 })); spr.position.set(n.pos[0], 1.65, n.pos[2]); spr.scale.set(2.1,0.5,1); scene.add(spr)
-  })
+  const chip = new THREE.Mesh(new THREE.BoxGeometry(1.2, .15, 1.2), white)
+  chip.position.y = .075; chip.castShadow = chip.receiveShadow = true
+  centralGroup.add(chip, glowPlane(new THREE.BoxGeometry(1.2, .012, 1.2), .075, .85))
 
-  // energy flow system
-  let isAnimating=false
-  function easeInOutCubic(x){ return x<0.5 ? 4*x*x*x : 1-Math.pow(-2*x+2,3)/2 }
-  function triggerEnergyFlow(nodeId, onComplete=()=>{}){
-    if(isAnimating) return; isAnimating=true
-    const data = nodeDataMap.get(nodeId); if(!data){ isAnimating=false; onComplete(); return }
-    const { pts, segLens, totalLen, line, group } = data
+  const core = new THREE.Mesh(new THREE.BoxGeometry(.6, .08, .6), white2)
+  core.position.y = .19; core.castShadow = true
+  centralGroup.add(core, glowPlane(new THREE.BoxGeometry(.6, .01, .6), .19, .6))
 
-    // bright line overlay
-    const brightMat = new THREE.LineBasicMaterial({ color:0x7afcff, transparent:true, opacity:1 })
-    const brightLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), brightMat); scene.add(brightLine)
+  const halo = glowPlane(new THREE.CircleGeometry(.725, 24), .2, .14)
+  centralGroup.add(halo)
+  centralGroup.add(glowPlane(new THREE.CircleGeometry(1.1, 24), .18, .06))
 
-    // tracer
-    const tracerGeo = new THREE.SphereGeometry(0.09,12,12)
-    const tracerMat = new THREE.MeshBasicMaterial({ color:0xaaffff })
-    const tracer = new THREE.Mesh(tracerGeo, tracerMat); scene.add(tracer)
-    const core = new THREE.Mesh(new THREE.SphereGeometry(0.05,10,10), new THREE.MeshBasicMaterial({ color:0xffffff })); tracer.add(core)
-    const light = new THREE.PointLight(0x7afcff, 2, 3); tracer.add(light)
+  const human = makeHuman(1.15)
+  human.position.set(0, .19, .05)
+  human.userData.isCentralHuman = true
+  centralGroup.add(human)
 
-    // trail points
-    const trail=[]
-    const trailCount=6
-    for(let i=0;i<trailCount;i++){ const s=new THREE.Mesh(new THREE.SphereGeometry(0.04-i*0.004,6,6), new THREE.MeshBasicMaterial({ color:0x7afcff, transparent:true, opacity:0.6-i*0.08 })); scene.add(s); trail.push(s) }
+  const light = new THREE.PointLight(0xeaffff, 1.2, 3.5)
+  light.position.set(0, .9, 0)
+  centralGroup.add(light)
 
-    const startTime = performance.now()
-    const duration = 700
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(.31, 16),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: .45 })
+  )
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = -.6
+  centralGroup.add(shadow)
 
-    function animateTracer(){
-      const elapsed = performance.now()-startTime
-      let t = Math.min(elapsed/duration,1)
-      const eased = easeInOutCubic(t)
-      const dist = eased*totalLen
-      // find segment
-      let acc=0, segIdx=0, segT=0
-      for(let i=0;i<segLens.length;i++){ if(dist <= acc+segLens[i]){ segIdx=i; segT=(dist-acc)/segLens[i]; break } acc+=segLens[i] }
-      if(segIdx>=pts.length-1){ segIdx=pts.length-2; segT=1 }
-      const p0=pts[segIdx], p1=pts[segIdx+1]
-      tracer.position.lerpVectors(p0,p1,segT)
-      tracer.scale.setScalar(1+Math.sin(elapsed*0.02)*0.15)
+  scene.add(centralGroup)
+  return centralGroup
+}
 
-      // trail follows
-      for(let i=0;i<trail.length;i++){
-        const tt = Math.max(0, t - (i+1)*0.07)
-        const d2 = tt*totalLen
-        let a2=0, s2=0, st2=0
-        for(let j=0;j<segLens.length;j++){ if(d2 <= a2+segLens[j]){ s2=j; st2=(d2-a2)/segLens[j]; break } a2+=segLens[j] }
-        if(s2<pts.length-1){ trail[i].position.lerpVectors(pts[s2], pts[s2+1], st2) }
-      }
+function projectLabel(node, element) {
+  const p = new THREE.Vector3(node.pos[0], .95, node.pos[1])
+  p.project(camera)
+  const w = root.value.clientWidth, h = root.value.clientHeight
+  const x = (p.x * .5 + .5) * w
+  const y = (-p.y * .5 + .5) * h
+  element.style.transform = `translate(${x}px,${y}px) translate(-50%,-100%)`
+  element.style.opacity = p.z < 1 ? '1' : '0'
+}
 
-      if(t<1) requestAnimationFrame(animateTracer)
-      else {
-        // burst
-        group.scale.set(1.15,1.15,1.15)
-        const origEmissive = whiteChip ? whiteChip.material.emissiveIntensity : 0
-        setTimeout(()=>{ group.scale.set(1,1,1); scene.remove(tracer); brightLine.material.opacity=0; trail.forEach(s=>scene.remove(s)); setTimeout(()=>{ scene.remove(brightLine); isAnimating=false; onComplete() }, 200) }, 180)
-      }
-    }
-    animateTracer()
+function makeLabel(node, data) {
+  const el = document.createElement('div')
+  el.className = 'label-tag'
+  el.dataset.id = node.id
+  el.innerHTML = '<span class="bracket">└ </span>' + node.id + '<span class="bracket"> ┘</span>'
+  el.addEventListener('mouseenter', () => setHover(node.id))
+  el.addEventListener('mouseleave', () => setHover(null))
+  el.addEventListener('click', e => { e.stopPropagation(); triggerEnergyFlow(node.id) })
+  labels.value.appendChild(el)
+  data.label = el
+  return el
+}
+
+function setHover(id) {
+  hoveredId = id
+  labels.value?.querySelectorAll('.label-tag').forEach(el => el.classList.toggle('hovered', el.dataset.id === id))
+  emit('hover', id)
+  if (renderer) renderer.domElement.style.cursor = id ? 'pointer' : 'grab'
+}
+
+function createPath(start, end) {
+  const a = new THREE.Vector3(0, .18, 0)
+  const b = new THREE.Vector3(start.x * .35, .06, start.z * .35)
+  const c = end.clone(); c.y = .04
+  return [a, b, c]
+}
+
+function animateEnergy(data) {
+  const pts = data.points
+  const lengths = []
+  let total = 0
+  for (let i = 0; i < pts.length - 1; i++) {
+    const l = pts[i].distanceTo(pts[i + 1]); lengths.push(l); total += l
   }
 
-  // interaction
-  const ray=new THREE.Raycaster(), mouse=new THREE.Vector2()
-  let isDrag=false, prev={x:0,y:0}
-  canvas.value.addEventListener('mousedown', e=>{ isDrag=false; prev={x:e.clientX,y:e.clientY} })
-  canvas.value.addEventListener('mousemove', e=>{
-    const dx=e.clientX-prev.x, dy=e.clientY-prev.y
-    if(Math.hypot(dx,dy)>3){ isDrag=true; camera.position.applyAxisAngle(new THREE.Vector3(0,1,0), -dx*0.01); camera.lookAt(0,0,0); prev={x:e.clientX,y:e.clientY} }
-  })
-  canvas.value.addEventListener('mouseup', e=>{
-    if(isDrag){ isDrag=false; return }
-    mouse.x=(e.clientX/window.innerWidth)*2-1; mouse.y=-(e.clientY/window.innerHeight)*2+1
-    ray.setFromCamera(mouse,camera)
-    const hits=ray.intersectObjects(interactives,true)
-    if(hits.length){ let o=hits[0].object; while(o.parent && !o.userData.id) o=o.parent; if(o.userData.id && !isAnimating){ triggerEnergyFlow(o.userData.id, ()=>{ emit('open', o.userData.id) }) } }
-    isDrag=false
-  })
-  canvas.value.addEventListener('wheel', e=>{ camera.zoom*=(e.deltaY>0?1.08:0.92); camera.zoom=Math.max(0.6,Math.min(3,camera.zoom)); camera.updateProjectionMatrix() })
+  const bright = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: 0x7cfaff, transparent: true, opacity: 1 })
+  )
+  scene.add(bright)
 
-  const clock=new THREE.Clock()
-  function animate(){ requestAnimationFrame(animate); const t=clock.getElapsedTime(); interactives.forEach(g=>{ g.position.y=g.userData.baseY+Math.sin(t+g.userData.t)*0.07 }); human.position.y=Math.sin(t*1.2)*0.04; centerGroup.rotation.y+=0.0015; renderer.render(scene,camera) }
-  triggerEnergyFlowRef = triggerEnergyFlow
+  const tracer = new THREE.Mesh(
+    new THREE.SphereGeometry(.09, 12, 12),
+    new THREE.MeshBasicMaterial({ color: 0xaaffff })
+  )
+  tracer.add(new THREE.PointLight(0x7cfaff, 2, 3))
+  scene.add(tracer)
+
+  const start = performance.now(), duration = 850
+  const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+
+  function tick() {
+    const raw = Math.min((performance.now() - start) / duration, 1)
+    const dist = ease(raw) * total
+    let acc = 0, index = 0, local = 0
+    for (; index < lengths.length; index++) {
+      if (dist <= acc + lengths[index]) { local = (dist - acc) / lengths[index]; break }
+      acc += lengths[index]
+    }
+    index = Math.min(index, pts.length - 2)
+    tracer.position.lerpVectors(pts[index], pts[index + 1], local)
+
+    if (raw < 1) requestAnimationFrame(tick)
+    else {
+      data.group.scale.setScalar(data.originalScale * 1.12)
+      setTimeout(() => {
+        data.group.scale.setScalar(data.originalScale)
+        scene.remove(tracer); scene.remove(bright)
+        bright.geometry.dispose(); bright.material.dispose()
+        tracer.geometry.dispose(); tracer.material.dispose()
+        data.animating = false
+        controls.enabled = true
+        emit('open', data.id)
+      }, 180)
+    }
+  }
+  tick()
+}
+
+function setupInteraction(nodeMap) {
+  raycaster = new THREE.Raycaster()
+  pointer = new THREE.Vector2()
+
+  const move = e => {
+    const r = renderer.domElement.getBoundingClientRect()
+    pointer.x = ((e.clientX - r.left) / r.width) * 2 - 1
+    pointer.y = -((e.clientY - r.top) / r.height) * 2 + 1
+    raycaster.setFromCamera(pointer, camera)
+    const hit = raycaster.intersectObjects([...nodeMap.values()].map(x => x.group), true)[0]
+    let id = null
+    if (hit) {
+      let o = hit.object
+      while (o && !o.userData.id) o = o.parent
+      id = o?.userData.id || null
+    }
+    setHover(id)
+  }
+
+  const click = e => {
+    if (hoveredId) triggerEnergyFlow(hoveredId)
+  }
+
+  renderer.domElement.addEventListener('pointermove', move)
+  renderer.domElement.addEventListener('click', click)
+  return () => {
+    renderer.domElement.removeEventListener('pointermove', move)
+    renderer.domElement.removeEventListener('click', click)
+  }
+}
+
+onMounted(() => {
+  const el = root.value
+  const width = el.clientWidth
+  const height = el.clientHeight
+
+  scene = new THREE.Scene()
+  scene.background = new THREE.Color('#05080c')
+  scene.fog = new THREE.Fog('#05080c', 18, 36)
+
+  camera = new THREE.OrthographicCamera(-7.5, 7.5, 7.5, -7.5, .1, 100)
+  camera.position.set(10, 10, 10)
+  camera.lookAt(0, 0, 0)
+  camera.zoom = 1.05
+  camera.updateProjectionMatrix()
+
+  renderer = new THREE.WebGLRenderer({ canvas: canvas.value, antialias: true, alpha: false, powerPreference: 'high-performance' })
+  renderer.setPixelRatio(props.quality === 'HIGH' ? Math.min(devicePixelRatio, 2) : 1)
+  renderer.setSize(width, height)
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.1
+
+  controls = new OrbitControls(camera, renderer.domElement)
+  controls.target.set(0, 0, 0)
+  controls.enableDamping = true
+  controls.dampingFactor = .09
+  controls.enablePan = false
+  controls.minZoom = .7
+  controls.maxZoom = 1.9
+  controls.minPolarAngle = Math.PI * .22
+  controls.maxPolarAngle = Math.PI * .42
+  controls.minAzimuthAngle = -.85
+  controls.maxAzimuthAngle = .85
+  controls.rotateSpeed = .55
+  controls.update()
+
+  scene.add(new THREE.AmbientLight(0xffffff, .42))
+
+  const key = new THREE.DirectionalLight(0xcfefff, 1.1)
+  key.position.set(6, 14, 4)
+  key.castShadow = true
+  key.shadow.mapSize.set(1024, 1024)
+  key.shadow.camera.near = .5
+  key.shadow.camera.far = 40
+  key.shadow.camera.left = -14; key.shadow.camera.right = 14
+  key.shadow.camera.top = 14; key.shadow.camera.bottom = -14
+  scene.add(key)
+
+  const centerLight = new THREE.PointLight(0x7cfaff, 2.2, 12)
+  centerLight.position.set(0, 2, 0); scene.add(centerLight)
+  const sideLight = new THREE.PointLight(0x7cfaff, 1, 10)
+  sideLight.position.set(5.5, 1.2, 5.2); scene.add(sideLight)
+
+  scene.add(createFloor())
+
+  const count = 96 * 96
+  const positions = new Float32Array(count * 3)
+  let k = 0
+  for (let z = -48; z < 48; z++) for (let x = -48; x < 48; x++) {
+    positions[k++] = x * .62 + (Math.random() - .5) * .06
+    positions[k++] = -.86
+    positions[k++] = z * .62 + (Math.random() - .5) * .06
+  }
+  const dotGeo = new THREE.BufferGeometry()
+  dotGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  scene.add(new THREE.Points(dotGeo, new THREE.PointsMaterial({ color: 0x0f2a33, size: .042, transparent: true, opacity: .62 })))
+
+  const central = addCentralChip()
+  const nodeMap = new Map()
+  const baseLine = new THREE.LineBasicMaterial({ color: 0x17333e, transparent: true, opacity: .55 })
+
+  NODE_LAYOUT.forEach(node => {
+    const group = new THREE.Group()
+    group.position.set(node.pos[0], 0, node.pos[1])
+    group.userData.id = node.id
+    group.userData.baseY = 0
+    group.userData.floatOffset = Math.random() * Math.PI * 2
+    group.userData.breathe = true
+    addNodeModel(group, node.id, node.scale)
+
+    const end = new THREE.Vector3(node.pos[0], 0, node.pos[1])
+    const points = createPath(end, end)
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), baseLine.clone())
+    scene.add(line)
+    scene.add(group)
+
+    const data = {
+      id: node.id, group, line, points,
+      originalScale: node.scale,
+      animating: false,
+      label: null
+    }
+    group.userData.nodeData = data
+    nodeMap.set(node.id, data)
+    makeLabel(node, data)
+  })
+
+  triggerEnergyFlow = id => {
+    const data = nodeMap.get(id)
+    if (!data || data.animating) return
+    data.animating = true
+    controls.enabled = false
+    animateEnergy(data)
+  }
+
+  setupInteraction(nodeMap)
+  const interactionCleanup = setupInteraction(nodeMap)
+
+  const onResize = () => {
+    const w = el.clientWidth, h = el.clientHeight
+    const aspect = w / h, size = 15
+    camera.left = -size * aspect / 2
+    camera.right = size * aspect / 2
+    camera.top = size / 2
+    camera.bottom = -size / 2
+    camera.updateProjectionMatrix()
+    renderer.setSize(w, h)
+    composer?.setSize(w, h)
+  }
+
+  composer = new EffectComposer(renderer)
+  composer.addPass(new RenderPass(scene, camera))
+  const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), .72, .8, .72)
+  composer.addPass(bloom)
+
+  const clock = new THREE.Clock()
+  const animate = () => {
+    raf = requestAnimationFrame(animate)
+    const t = clock.getElapsedTime()
+    controls.update()
+
+    nodeMap.forEach(data => {
+      const g = data.group
+      g.position.y = g.userData.baseY + Math.sin(t * .6 + g.userData.floatOffset) * .06
+      g.traverse(child => {
+        if (child.userData?.breathe) child.scale.y = 1 + Math.sin(t * 1.6 + g.userData.floatOffset) * .035
+      })
+    })
+
+    central.traverse(child => {
+      if (child.userData?.isCentralHuman) {
+        child.position.y = .24 + Math.sin(t * 1.5) * .025
+        child.scale.y = 1 + Math.sin(t * 1.6) * .03
+      }
+    })
+    if (!nodeMap.values().some(d => d.animating)) central.position.y = Math.sin(t * .5) * .04
+
+    nodeMap.forEach(data => projectLabel({ pos: data.group.position }, data.label))
+    composer.render()
+  }
   animate()
-  window.addEventListener('resize',()=>{ renderer.setSize(innerWidth,innerHeight); const asp=innerWidth/innerHeight; camera.left=-d*asp; camera.right=d*asp; camera.top=d; camera.bottom=-d; camera.updateProjectionMatrix() })
-})
-watch(() => props.quality, (value) => {
-  if (canvas.value?.__renderer) canvas.value.__renderer.setPixelRatio(value === 'HIGH' ? Math.min(window.devicePixelRatio,2) : 1)
+
+  window.addEventListener('resize', onResize)
+  cleanup = () => {
+    cancelAnimationFrame(raf)
+    window.removeEventListener('resize', onResize)
+    interactionCleanup()
+    labels.value?.replaceChildren()
+    scene.traverse(o => {
+      if (o.geometry) o.geometry.dispose()
+      if (o.material) {
+        const materials = Array.isArray(o.material) ? o.material : [o.material]
+        materials.forEach(m => { m.map?.dispose(); m.dispose() })
+      }
+    })
+    composer?.dispose()
+    controls?.dispose()
+    renderer?.dispose()
+  }
 })
 
-defineExpose({ triggerEnergyFlow: (...args) => triggerEnergyFlowRef?.(...args) })
-onBeforeUnmount(() => { triggerEnergyFlowRef = null })
+watch(() => props.quality, value => {
+  if (renderer) renderer.setPixelRatio(value === 'HIGH' ? Math.min(devicePixelRatio, 2) : 1)
+})
+
+defineExpose({ triggerEnergyFlow: id => triggerEnergyFlow(id) })
+
+onBeforeUnmount(() => {
+  cleanup()
+  triggerEnergyFlow = () => {}
+})
 </script>
-<style>.canvas{width:100vw;height:100vh;display:block;cursor:grab}.canvas:active{cursor:grabbing}</style>
+
+<style scoped>
+.world {
+  position: relative;
+  width: 100%;
+  height: 100svh;
+  overflow: hidden;
+  background: #05080c;
+  user-select: none;
+}
+.world canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+.world canvas:active { cursor: grabbing; }
+.labels {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+.label-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: .18em;
+  color: #7a9aaa;
+  background: rgba(5,8,12,.78);
+  border: 1px solid rgba(15,42,51,.9);
+  padding: 4px 8px;
+  backdrop-filter: blur(6px);
+  transition: all .2s ease;
+  white-space: nowrap;
+  line-height: 1;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.6) inset;
+}
+.label-tag .bracket { color: #3a5a6a; }
+.label-tag:hover,
+.label-tag.hovered {
+  color: #e8fdff;
+  border-color: rgba(124,250,255,.65);
+  background: rgba(124,250,255,.10);
+  box-shadow: 0 0 18px rgba(124,250,255,.28), 0 0 0 1px rgba(124,250,255,.15) inset;
+  transform: translate(-50%,-100%) scale(1.06) !important;
+}
+.label-tag:hover .bracket,
+.label-tag.hovered .bracket { color: #7cfaff; }
+.noise {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  opacity: .035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.vignette {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.62) 100%);
+}
+</style>
