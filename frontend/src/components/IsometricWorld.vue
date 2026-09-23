@@ -1,9 +1,11 @@
 
 <template><canvas ref="canvas" class="canvas"></canvas></template>
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch, onBeforeUnmount } from 'vue'
 import * as THREE from 'three'
-const emit = defineEmits(['open'])
+const emit = defineEmits(['open','hover'])
+const props = defineProps({ quality: { type: String, default: 'HIGH' } })
+let triggerEnergyFlowRef = null
 const canvas = ref(null)
 
 onMounted(()=>{
@@ -13,7 +15,7 @@ onMounted(()=>{
 
   const renderer = new THREE.WebGLRenderer({ canvas: canvas.value, antialias:true, alpha:false })
   renderer.setSize(window.innerWidth, window.innerHeight)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2))
+  renderer.setPixelRatio(props.quality === 'HIGH' ? Math.min(window.devicePixelRatio,2) : 1)
 
   const d = 11
   const aspect = window.innerWidth/window.innerHeight
@@ -138,7 +140,7 @@ onMounted(()=>{
   // energy flow system
   let isAnimating=false
   function easeInOutCubic(x){ return x<0.5 ? 4*x*x*x : 1-Math.pow(-2*x+2,3)/2 }
-  function triggerEnergyFlow(nodeId, onComplete){
+  function triggerEnergyFlow(nodeId, onComplete=()=>{}){
     if(isAnimating) return; isAnimating=true
     const data = nodeDataMap.get(nodeId); if(!data){ isAnimating=false; onComplete(); return }
     const { pts, segLens, totalLen, line, group } = data
@@ -215,8 +217,15 @@ onMounted(()=>{
 
   const clock=new THREE.Clock()
   function animate(){ requestAnimationFrame(animate); const t=clock.getElapsedTime(); interactives.forEach(g=>{ g.position.y=g.userData.baseY+Math.sin(t+g.userData.t)*0.07 }); human.position.y=Math.sin(t*1.2)*0.04; centerGroup.rotation.y+=0.0015; renderer.render(scene,camera) }
+  triggerEnergyFlowRef = triggerEnergyFlow
   animate()
   window.addEventListener('resize',()=>{ renderer.setSize(innerWidth,innerHeight); const asp=innerWidth/innerHeight; camera.left=-d*asp; camera.right=d*asp; camera.top=d; camera.bottom=-d; camera.updateProjectionMatrix() })
 })
+watch(() => props.quality, (value) => {
+  if (canvas.value?.__renderer) canvas.value.__renderer.setPixelRatio(value === 'HIGH' ? Math.min(window.devicePixelRatio,2) : 1)
+})
+
+defineExpose({ triggerEnergyFlow: (...args) => triggerEnergyFlowRef?.(...args) })
+onBeforeUnmount(() => { triggerEnergyFlowRef = null })
 </script>
 <style>.canvas{width:100vw;height:100vh;display:block;cursor:grab}.canvas:active{cursor:grabbing}</style>
