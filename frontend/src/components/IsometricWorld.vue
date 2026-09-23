@@ -133,14 +133,20 @@ function addNodeModel(group, id, scale) {
         group.add(sign)
       }
     })
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(.12, .9, .12), dark)
+    tower.position.set(-.8, .46, .7); group.add(tower)
+    const towerGlow = new THREE.PointLight(0x7cfaff, .35, 1.2)
+    towerGlow.position.set(-.8, .92, .7); group.add(towerGlow)
   } else if (id === 'BACKSTACK') {
     const box = new THREE.Mesh(new THREE.BoxGeometry(.56, .72, .42), dark)
     box.position.y = .38
     box.castShadow = true
     group.add(box)
+    group.add(glowPlane(new THREE.BoxGeometry(.56, .72, .42), .38, .22))
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, .5, 8), dark)
     mast.position.set(.32, .45, .12); mast.rotation.z = .6
     group.add(mast)
+  }
   } else if (id === 'TESTIMONIALS' || id === 'CONTACT') {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(.035, .035, .48, 8), dark)
     pole.position.y = .24
@@ -174,8 +180,8 @@ function addNodeModel(group, id, scale) {
       screen.position.set(0, .54 + (id === 'EXPERIENCE' ? .04 : 0), -.1)
       screen.rotation.x = -.08
       group.add(screen)
-      group.add(glowPlane(new THREE.BoxGeometry(id === 'SKILLS' ? .38 : .44, .22, .008),
-        .55 + (id === 'EXPERIENCE' ? .04 : 0), id === 'SKILLS' ? .62 : .45))
+      group.add(glowPlane(new THREE.BoxGeometry(id === 'SKILLS' ? .38 : .44, id === 'SKILLS' ? .22 : .26, .008),
+        id === 'SKILLS' ? .55 : .59, id === 'SKILLS' ? .62 : .45))
     } else {
       const screen = new THREE.Mesh(new THREE.BoxGeometry(.36, .24, .04), dark)
       screen.position.set(-.05, .5, -.08); screen.rotation.x = -.06
@@ -200,29 +206,74 @@ function createFloor() {
   const c = document.createElement('canvas')
   c.width = c.height = 1024
   const x = c.getContext('2d')
-  x.fillStyle = '#05080c'; x.fillRect(0, 0, 1024, 1024)
-  x.strokeStyle = '#0a1318'; x.lineWidth = 1
+  x.fillStyle = '#05080c'
+  x.fillRect(0, 0, 1024, 1024)
+
+  x.strokeStyle = '#0a1318'
+  x.lineWidth = 1
   for (let i = 0; i < 1024; i += 64) {
     x.globalAlpha = .55
     x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 1024); x.stroke()
     x.beginPath(); x.moveTo(0, i); x.lineTo(1024, i); x.stroke()
   }
+
   x.strokeStyle = '#081219'
+  x.lineWidth = .5
   for (let i = 0; i < 1024; i += 16) {
     x.globalAlpha = .18
     x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 1024); x.stroke()
     x.beginPath(); x.moveTo(0, i); x.lineTo(1024, i); x.stroke()
   }
+
   x.strokeStyle = '#0a1f26'
   for (let i = 0; i < 140; i++) {
-    const a = Math.random() * 1024, b = Math.random() * 1024, o = 40 + Math.random() * 120
+    const a = Math.random() * 1024
+    const b = Math.random() * 1024
+    const o = 40 + Math.random() * 120
+    const horizontal = Math.random() > .5
     x.globalAlpha = .22 + Math.random() * .18
-    x.beginPath(); x.moveTo(a, b); x.lineTo(a + o, b); x.lineTo(a + o, b + (Math.random() > .5 ? o * .6 : -o * .6)); x.stroke()
-    x.fillStyle = '#0f2a33'; x.globalAlpha = .7; x.fillRect(a - 1.5, b - 1.5, 3, 3)
+    x.lineWidth = 1
+    x.beginPath()
+    x.moveTo(a, b)
+    if (horizontal) {
+      x.lineTo(a + o, b)
+      x.lineTo(a + o, b + (Math.random() > .5 ? o * .6 : -o * .6))
+    } else {
+      x.lineTo(a, b + o)
+      x.lineTo(a + (Math.random() > .5 ? o * .6 : -o * .6), b + o)
+    }
+    x.stroke()
+    x.fillStyle = '#0f2a33'
+    x.globalAlpha = .7
+    x.fillRect(a - 1.5, b - 1.5, 3, 3)
   }
+
+  x.fillStyle = '#0f2a33'
+  for (let i = 8; i < 1024; i += 32) {
+    for (let j = 8; j < 1024; j += 32) {
+      if (Math.random() > .75) {
+        x.globalAlpha = .55 + Math.random() * .3
+        x.beginPath()
+        x.arc(i + (Math.random() - .5) * 2, j + (Math.random() - .5) * 2, 1.2, 0, Math.PI * 2)
+        x.fill()
+      }
+    }
+  }
+
+  x.globalAlpha = .04
+  for (let i = 0; i < 8000; i++) {
+    const px = Math.random() * 1024
+    const py = Math.random() * 1024
+    x.fillStyle = Math.random() > .5 ? '#7cfaff' : '#ffffff'
+    x.fillRect(px, py, .8, .8)
+  }
+
   const tex = new THREE.CanvasTexture(c)
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping
   tex.repeat.set(2.5, 2.5)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
+
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(110, 110),
     new THREE.MeshStandardMaterial({ map: tex, color: 0x05080c, roughness: .95, metalness: .05 })
@@ -274,6 +325,7 @@ function addCentralChip() {
 
 function projectLabel(node, element) {
   const p = new THREE.Vector3(node.pos[0], .95, node.pos[1])
+  if (node.id === 'PROJECTS') p.z -= .35
   p.project(camera)
   const w = root.value.clientWidth, h = root.value.clientHeight
   const x = (p.x * .5 + .5) * w
@@ -302,10 +354,21 @@ function setHover(id) {
   if (renderer) renderer.domElement.style.cursor = id ? 'pointer' : 'grab'
 }
 
-function createPath(start, end) {
-  const a = new THREE.Vector3(0, .18, 0)
-  const b = new THREE.Vector3(start.x * .35, .06, start.z * .35)
-  const c = end.clone(); c.y = .04
+function createPath(node) {
+  const a = new THREE.Vector3(0, .06, 0)
+  const x = node.pos[0], z = node.pos[1]
+  let p = 0, o = 0
+  if (node.id === 'PROJECTS') p = x, o = -2.2
+  else if (node.id === 'BACKSTACK') p = x, o = -2.2
+  else if (node.id === 'TESTIMONIALS') p = -4.2, o = z
+  else if (node.id === 'EXPERIENCE') p = -3, o = z
+  else if (node.id === 'SKILLS') p = x, o = 1.2
+  else if (node.id === 'ABOUT ME') p = 1.8, o = z
+  else if (node.id === 'RESUME') p = 2.8, o = z
+  else if (node.id === 'CONTACT') p = x, o = -1.5
+  else Math.abs(x) > Math.abs(z) ? (p = 0, o = z) : (p = x, o = 0)
+  const b = new THREE.Vector3(p, .06, o)
+  const c = new THREE.Vector3(x, .06, z)
   return [a, b, c]
 }
 
@@ -459,7 +522,8 @@ onMounted(() => {
   }
   const dotGeo = new THREE.BufferGeometry()
   dotGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  scene.add(new THREE.Points(dotGeo, new THREE.PointsMaterial({ color: 0x0f2a33, size: .042, transparent: true, opacity: .62 })))
+  scene.add(new THREE.Points(dotGeo, new THREE.PointsMaterial({ color: 0x0f2a33, size: .042, sizeAttenuation: true, transparent: true, opacity: .62 })))
+  scene.add(new THREE.Points(dotGeo.clone(), new THREE.PointsMaterial({ color: 0x7cfaff, size: .06, sizeAttenuation: true, transparent: true, opacity: .08, blending: THREE.AdditiveBlending })))
 
   const central = addCentralChip()
   const nodeMap = new Map()
@@ -475,7 +539,7 @@ onMounted(() => {
     addNodeModel(group, node.id, node.scale)
 
     const end = new THREE.Vector3(node.pos[0], 0, node.pos[1])
-    const points = createPath(end, end)
+    const points = createPath(node)
     const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), baseLine.clone())
     scene.add(line)
     scene.add(group)
@@ -515,7 +579,7 @@ onMounted(() => {
 
   composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), .72, .8, .72)
+  const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), .62, .35, .12)
   composer.addPass(bloom)
 
   const clock = new THREE.Clock()
