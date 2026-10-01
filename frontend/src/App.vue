@@ -96,7 +96,7 @@ function init(){
  controls=new OrbitControls(camera,renderer.domElement);controls.target.set(0,0,0);controls.enableDamping=true;controls.dampingFactor=.09;controls.enablePan=false;controls.minZoom=.7;controls.maxZoom=1.9;controls.minPolarAngle=Math.PI*.22;controls.maxPolarAngle=Math.PI*.42;controls.minAzimuthAngle=-.85;controls.maxAzimuthAngle=.85;controls.rotateSpeed=.55;
  scene.add(new THREE.AmbientLight("#fff",.42));let sun=new THREE.DirectionalLight("#cfefff",1.1);sun.position.set(6,14,4);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);scene.add(sun);let pl=new THREE.PointLight(C,2.2,12);pl.position.set(0,1,0);scene.add(pl);
  composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.62,.35,.12));raycaster=new THREE.Raycaster();mouse=new THREE.Vector2();clock=new THREE.Clock();
- createBoard();const [cg,h]=central();window._human=h;centralGroup=cg;createNodes();connections();renderer.domElement.addEventListener("pointermove",pointer);renderer.domElement.addEventListener("click",click);addEventListener("resize",resize);animate()
+ createBoard();const [cg,h]=central();window._human=h;createNodes();connections();renderer.domElement.addEventListener("pointermove",pointer);renderer.domElement.addEventListener("click",click);addEventListener("resize",resize);animate()
 }
 onMounted(init);onBeforeUnmount(()=>{cancelAnimationFrame(raf);removeEventListener("resize",resize);renderer?.dispose()});
 </script>
